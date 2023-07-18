@@ -167,7 +167,7 @@ async function resolveVersionFromManifest(
 }
 
 function isSymlinkable(toolCacheRoot: string | undefined): boolean {
-  // Symlinks can be safely used on the windows github-hosted runners where both C: and D: drives are existed
+  // symlinks can be safely used on the windows github-hosted runners where both C: and D: drives are existed
   const isHosted =
     process.env['RUNNER_ENVIRONMENT'] === 'github-hosted' ||
     process.env['AGENT_ISSELFHOSTED'] === '0';

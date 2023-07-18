@@ -61443,7 +61443,7 @@ function resolveVersionFromManifest(versionSpec, stable, auth, arch, manifest) {
     });
 }
 function isSymlinkable(toolCacheRoot) {
-    // Symlinks can be safely used on the windows github-hosted runners where both C: and D: drives are existed
+    // symlinks can be safely used on the windows github-hosted runners where both C: and D: drives are existed
     const isHosted = process.env['RUNNER_ENVIRONMENT'] === 'github-hosted' ||
         process.env['AGENT_ISSELFHOSTED'] === '0';
     const disksExistence = fs_1.default.existsSync('d:\\') && fs_1.default.existsSync('c:\\');
