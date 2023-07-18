@@ -61338,7 +61338,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.resolveStableVersionInput = exports.parseGoVersionFile = exports.makeSemver = exports.getVersionsDist = exports.findMatch = exports.getInfoFromManifest = exports.getManifest = exports.extractGoArchive = exports.addExecutablesToCache = exports.getGo = void 0;
+exports.resolveStableVersionInput = exports.parseGoVersionFile = exports.makeSemver = exports.getVersionsDist = exports.findMatch = exports.getInfoFromManifest = exports.getManifest = exports.extractGoArchive = exports.addToCache = exports.getGo = void 0;
 const tc = __importStar(__nccwpck_require__(7784));
 const core = __importStar(__nccwpck_require__(2186));
 const path = __importStar(__nccwpck_require__(1017));
@@ -61348,6 +61348,7 @@ const sys = __importStar(__nccwpck_require__(4300));
 const fs_1 = __importDefault(__nccwpck_require__(7147));
 const os_1 = __importDefault(__nccwpck_require__(2037));
 const utils_1 = __nccwpck_require__(1314);
+const isWindows = os_1.default.platform() === 'win32';
 function getGo(versionSpec, checkLatest, auth, arch = os_1.default.arch()) {
     return __awaiter(this, void 0, void 0, function* () {
         let manifest;
@@ -61441,20 +61442,39 @@ function resolveVersionFromManifest(versionSpec, stable, auth, arch, manifest) {
         }
     });
 }
-function addExecutablesToCache(extPath, info, arch) {
+function addToCache(extPath, info, arch) {
     return __awaiter(this, void 0, void 0, function* () {
-        core.info('Adding to the cache ...');
-        const cachedDir = yield tc.cacheDir(extPath, 'go', makeSemver(info.resolvedVersion), arch);
-        core.info(`Successfully cached go to ${cachedDir}`);
-        return cachedDir;
+        const isHosted = process.env['RUNNER_ENVIRONMENT'] === 'github-hosted' ||
+            process.env['AGENT_ISSELFHOSTED'] === '0';
+        const defaultToolCacheRoot = process.env['RUNNER_TOOL_CACHE'];
+        // for the github hosted windows runners avoid big write operations with drive C: to improve efficiency
+        if (isWindows && isHosted && defaultToolCacheRoot) {
+            if (fs_1.default.existsSync('d:\\') && fs_1.default.existsSync('c:\\')) {
+                const substitutedToolCacheRoot = defaultToolCacheRoot
+                    .replace('C:', 'D:')
+                    .replace('c:', 'd:');
+                // temporary aim tc.cacheDir() function to save toolcache on drive D:
+                process.env['RUNNER_TOOL_CACHE'] = substitutedToolCacheRoot;
+                const actualToolCacheDir = yield tc.cacheDir(extPath, 'go', makeSemver(info.resolvedVersion), arch);
+                // restore toolcache root to default drive C:
+                process.env['RUNNER_TOOL_CACHE'] = defaultToolCacheRoot;
+                // create a symlink from drive C: to drive D:
+                const defaultToolCacheDir = actualToolCacheDir.replace(substitutedToolCacheRoot, defaultToolCacheRoot);
+                fs_1.default.mkdirSync(path.dirname(defaultToolCacheDir), { recursive: true });
+                fs_1.default.symlinkSync(actualToolCacheDir, defaultToolCacheDir, 'junction');
+                core.info(`The symlink from ${defaultToolCacheDir} to ${actualToolCacheDir} is created`);
+                return defaultToolCacheDir;
+            }
+        }
+        const cacheDir = yield tc.cacheDir(extPath, 'go', makeSemver(info.resolvedVersion), arch);
+        return cacheDir;
     });
 }
-exports.addExecutablesToCache = addExecutablesToCache;
+exports.addToCache = addToCache;
 function installGoVersion(info, auth, arch) {
     return __awaiter(this, void 0, void 0, function* () {
         core.info(`Acquiring ${info.resolvedVersion} from ${info.downloadUrl}`);
         // Windows requires that we keep the extension (.zip) for extraction
-        const isWindows = os_1.default.platform() === 'win32';
         const tempDir = process.env.RUNNER_TEMP || '.';
         const fileName = isWindows ? path.join(tempDir, info.fileName) : undefined;
         const downloadPath = yield tc.downloadTool(info.downloadUrl, fileName, auth);
@@ -61464,34 +61484,10 @@ function installGoVersion(info, auth, arch) {
         if (info.type === 'dist') {
             extPath = path.join(extPath, 'go');
         }
-        // for github hosted windows runner handle latency of OS drive
-        // by avoiding write operations to C:
-        if (!isWindows)
-            return addExecutablesToCache(extPath, info, arch);
-        const isHosted = process.env['RUNNER_ENVIRONMENT'] === 'github-hosted' ||
-            process.env['AGENT_ISSELFHOSTED'] === '0';
-        if (!isHosted)
-            return addExecutablesToCache(extPath, info, arch);
-        const defaultToolCacheRoot = process.env['RUNNER_TOOL_CACHE'];
-        if (!defaultToolCacheRoot)
-            return addExecutablesToCache(extPath, info, arch);
-        if (!fs_1.default.existsSync('d:\\') || !fs_1.default.existsSync('c:\\'))
-            return addExecutablesToCache(extPath, info, arch);
-        const substitutedToolCacheRoot = defaultToolCacheRoot
-            .replace('C:', 'D:')
-            .replace('c:', 'd:');
-        // make toolcache root to be on drive d:
-        process.env['RUNNER_TOOL_CACHE'] = substitutedToolCacheRoot;
-        const actualToolCacheDir = yield addExecutablesToCache(extPath, info, arch);
-        // create a link from c: to d:
-        const defaultToolCacheDir = actualToolCacheDir.replace(substitutedToolCacheRoot, defaultToolCacheRoot);
-        fs_1.default.mkdirSync(path.dirname(defaultToolCacheDir), { recursive: true });
-        fs_1.default.symlinkSync(actualToolCacheDir, defaultToolCacheDir, 'junction');
-        core.info(`Created link ${defaultToolCacheDir} => ${actualToolCacheDir}`);
-        // restore toolcache root to default drive c:
-        process.env['RUNNER_TOOL_CACHE'] = defaultToolCacheRoot;
-        // make outer code to continue using toolcache as if it were installed on c:
-        return defaultToolCacheDir;
+        core.info('Adding to the cache ...');
+        const cacheDir = yield addToCache(extPath, info, arch);
+        core.info(`Successfully cached go to ${cacheDir}`);
+        return cacheDir;
     });
 }
 function extractGoArchive(archivePath) {
