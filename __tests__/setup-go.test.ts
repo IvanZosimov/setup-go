@@ -3,7 +3,7 @@ import * as io from '@actions/io';
 import * as tc from '@actions/tool-cache';
 import fs from 'fs';
 import cp from 'child_process';
-import osm from 'os';
+import osm, {type} from 'os';
 import path from 'path';
 import * as main from '../src/main';
 import * as im from '../src/installer';
@@ -11,6 +11,7 @@ import * as im from '../src/installer';
 import goJsonData from './data/golang-dl.json';
 import matchers from '../matchers.json';
 import goTestManifest from './data/versions-manifest.json';
+import {addExecutablesToCache, IGoVersionInfo} from '../src/installer';
 const matcherPattern = matchers.problemMatcher[0].pattern[0];
 const matcherRegExp = new RegExp(matcherPattern.regexp);
 const win32Join = path.win32.join;
@@ -39,6 +40,8 @@ describe('setup-go', () => {
   let existsSpy: jest.SpyInstance;
   let readFileSpy: jest.SpyInstance;
   let mkdirpSpy: jest.SpyInstance;
+  let mkdirSpy: jest.SpyInstance;
+  let symlinkSpy: jest.SpyInstance;
   let execSpy: jest.SpyInstance;
   let getManifestSpy: jest.SpyInstance;
   let getAllVersionsSpy: jest.SpyInstance;
@@ -91,6 +94,11 @@ describe('setup-go', () => {
     existsSpy = jest.spyOn(fs, 'existsSync');
     readFileSpy = jest.spyOn(fs, 'readFileSync');
     mkdirpSpy = jest.spyOn(io, 'mkdirP');
+
+    // fs
+    mkdirSpy = jest.spyOn(fs, 'mkdir');
+    symlinkSpy = jest.spyOn(fs, 'symlinkSync');
+    symlinkSpy.mockImplementation(() => {});
 
     // gets
     getManifestSpy.mockImplementation(() => <tc.IToolRelease[]>goTestManifest);

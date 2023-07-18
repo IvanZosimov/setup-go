@@ -8,6 +8,8 @@ import fs from 'fs';
 import os from 'os';
 import {StableReleaseAlias} from './utils';
 
+const isWindows = os.platform() === 'win32';
+
 type InstallationType = 'dist' | 'manifest';
 
 export interface IGoVersionFile {
@@ -164,6 +166,62 @@ async function resolveVersionFromManifest(
   }
 }
 
+function isSymlinkable(toolCacheRoot: string | undefined): boolean {
+  // symlinks can be safely used on the windows github-hosted runners where both C: and D: drives are existed
+  const isHosted =
+    process.env['RUNNER_ENVIRONMENT'] === 'github-hosted' ||
+    process.env['AGENT_ISSELFHOSTED'] === '0';
+  const disksExistence = fs.existsSync('d:\\') && fs.existsSync('c:\\');
+
+  return Boolean(isWindows && isHosted && toolCacheRoot && disksExistence);
+}
+
+export async function addToCache(
+  extPath: string,
+  info: IGoVersionInfo,
+  arch: string
+): Promise<string> {
+  const defaultToolCacheRoot = process.env['RUNNER_TOOL_CACHE'];
+
+  // for the github hosted windows runners avoid big write operations to drive C: to improve efficiency
+  if (isSymlinkable(defaultToolCacheRoot)) {
+    const substitutedToolCacheRoot = defaultToolCacheRoot!
+      .replace('C:', 'D:')
+      .replace('c:', 'd:');
+    // temporary aim tc.cacheDir() function to save toolcache on drive D:
+    process.env['RUNNER_TOOL_CACHE'] = substitutedToolCacheRoot;
+
+    const actualToolCacheDir = await tc.cacheDir(
+      extPath,
+      'go',
+      makeSemver(info.resolvedVersion),
+      arch
+    );
+
+    // restore toolcache root to default drive C:
+    process.env['RUNNER_TOOL_CACHE'] = defaultToolCacheRoot;
+
+    // create a symlink from drive C: to drive D:
+    const defaultToolCacheDir = actualToolCacheDir.replace(
+      substitutedToolCacheRoot,
+      defaultToolCacheRoot!
+    );
+    fs.mkdirSync(path.dirname(defaultToolCacheDir), {recursive: true});
+    fs.symlinkSync(actualToolCacheDir, defaultToolCacheDir, 'junction');
+    core.info(
+      `The symlink from ${defaultToolCacheDir} to ${actualToolCacheDir} is created`
+    );
+    return defaultToolCacheDir;
+  }
+  const cacheDir = await tc.cacheDir(
+    extPath,
+    'go',
+    makeSemver(info.resolvedVersion),
+    arch
+  );
+  return cacheDir;
+}
+
 async function installGoVersion(
   info: IGoVersionInfo,
   auth: string | undefined,
@@ -172,7 +230,6 @@ async function installGoVersion(
   core.info(`Acquiring ${info.resolvedVersion} from ${info.downloadUrl}`);
 
   // Windows requires that we keep the extension (.zip) for extraction
-  const isWindows = os.platform() === 'win32';
   const tempDir = process.env.RUNNER_TEMP || '.';
   const fileName = isWindows ? path.join(tempDir, info.fileName) : undefined;
 
@@ -186,14 +243,9 @@ async function installGoVersion(
   }
 
   core.info('Adding to the cache ...');
-  const cachedDir = await tc.cacheDir(
-    extPath,
-    'go',
-    makeSemver(info.resolvedVersion),
-    arch
-  );
-  core.info(`Successfully cached go to ${cachedDir}`);
-  return cachedDir;
+  const cacheDir = await addToCache(extPath, info, arch);
+  core.info(`Successfully cached go to ${cacheDir}`);
+  return cacheDir;
 }
 
 export async function extractGoArchive(archivePath: string): Promise<string> {
