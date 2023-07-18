@@ -61442,29 +61442,32 @@ function resolveVersionFromManifest(versionSpec, stable, auth, arch, manifest) {
         }
     });
 }
+function isSymlinkable(toolCacheRoot) {
+    // Symlinks can be safely used on the windows github-hosted runners where both C: and D: drives are existed
+    const isHosted = process.env['RUNNER_ENVIRONMENT'] === 'github-hosted' ||
+        process.env['AGENT_ISSELFHOSTED'] === '0';
+    const disksExistence = fs_1.default.existsSync('d:\\') && fs_1.default.existsSync('c:\\');
+    return Boolean(isWindows && isHosted && toolCacheRoot && disksExistence);
+}
 function addToCache(extPath, info, arch) {
     return __awaiter(this, void 0, void 0, function* () {
-        const isHosted = process.env['RUNNER_ENVIRONMENT'] === 'github-hosted' ||
-            process.env['AGENT_ISSELFHOSTED'] === '0';
         const defaultToolCacheRoot = process.env['RUNNER_TOOL_CACHE'];
-        // for the github hosted windows runners avoid big write operations with drive C: to improve efficiency
-        if (isWindows && isHosted && defaultToolCacheRoot) {
-            if (fs_1.default.existsSync('d:\\') && fs_1.default.existsSync('c:\\')) {
-                const substitutedToolCacheRoot = defaultToolCacheRoot
-                    .replace('C:', 'D:')
-                    .replace('c:', 'd:');
-                // temporary aim tc.cacheDir() function to save toolcache on drive D:
-                process.env['RUNNER_TOOL_CACHE'] = substitutedToolCacheRoot;
-                const actualToolCacheDir = yield tc.cacheDir(extPath, 'go', makeSemver(info.resolvedVersion), arch);
-                // restore toolcache root to default drive C:
-                process.env['RUNNER_TOOL_CACHE'] = defaultToolCacheRoot;
-                // create a symlink from drive C: to drive D:
-                const defaultToolCacheDir = actualToolCacheDir.replace(substitutedToolCacheRoot, defaultToolCacheRoot);
-                fs_1.default.mkdirSync(path.dirname(defaultToolCacheDir), { recursive: true });
-                fs_1.default.symlinkSync(actualToolCacheDir, defaultToolCacheDir, 'junction');
-                core.info(`The symlink from ${defaultToolCacheDir} to ${actualToolCacheDir} is created`);
-                return defaultToolCacheDir;
-            }
+        // for the github hosted windows runners avoid big write operations to drive C: to improve efficiency
+        if (isSymlinkable(defaultToolCacheRoot)) {
+            const substitutedToolCacheRoot = defaultToolCacheRoot
+                .replace('C:', 'D:')
+                .replace('c:', 'd:');
+            // temporary aim tc.cacheDir() function to save toolcache on drive D:
+            process.env['RUNNER_TOOL_CACHE'] = substitutedToolCacheRoot;
+            const actualToolCacheDir = yield tc.cacheDir(extPath, 'go', makeSemver(info.resolvedVersion), arch);
+            // restore toolcache root to default drive C:
+            process.env['RUNNER_TOOL_CACHE'] = defaultToolCacheRoot;
+            // create a symlink from drive C: to drive D:
+            const defaultToolCacheDir = actualToolCacheDir.replace(substitutedToolCacheRoot, defaultToolCacheRoot);
+            fs_1.default.mkdirSync(path.dirname(defaultToolCacheDir), { recursive: true });
+            fs_1.default.symlinkSync(actualToolCacheDir, defaultToolCacheDir, 'junction');
+            core.info(`The symlink from ${defaultToolCacheDir} to ${actualToolCacheDir} is created`);
+            return defaultToolCacheDir;
         }
         const cacheDir = yield tc.cacheDir(extPath, 'go', makeSemver(info.resolvedVersion), arch);
         return cacheDir;
